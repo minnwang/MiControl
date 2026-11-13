@@ -1,0 +1,94 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="MiControl"
+           Manufacturer="MiControl"
+           Version="1.2.1"
+           UpgradeCode="8F2B4C71-3A5D-4E6B-9C1D-5E7A2B4C6D80"
+           Scope="perMachine"
+           Language="2052"
+           Codepage="65001">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MiControl is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="payload\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+    <ui:WixUI Id="WixUI_InstallDir" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MiControl">
+        <Directory Id="TrayDir" Name="tray" />
+        <Directory Id="ServiceDir" Name="service" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuDir" Name="MiControl" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="MiControl" Level="1">
+      <ComponentGroupRef Id="TrayFiles" />
+      <ComponentRef Id="ServiceComponent" />
+      <ComponentGroupRef Id="ServiceFiles" />
+      <ComponentRef Id="StartMenuComponent" />
+    </Feature>
+
+    <ComponentGroup Id="TrayFiles" Directory="TrayDir">
+      <Files Include="payload\tray\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="ServiceFiles" Directory="ServiceDir">
+      <Files Include="payload\service\*.dll" />
+      <Files Include="payload\service\*.json" />
+    </ComponentGroup>
+
+    <Component Id="ServiceComponent" Directory="ServiceDir" Guid="2C3D4E5F-6071-4829-AB9C-1D2E3F4A5B61">
+      <File Id="SvcExe" Source="payload\service\MiControlService.exe" KeyPath="yes" />
+      <ServiceInstall Id="SvcInstall"
+                      Name="MiControlService"
+                      DisplayName="MiControl Service"
+                      Description="Battery charge limit and performance mode control (Xiaomi MIFS ACPI-WMI)."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Account="LocalSystem" />
+      <ServiceControl Id="SvcControl"
+                      Name="MiControlService"
+                      Start="install"
+                      Stop="both"
+                      Remove="uninstall"
+                      Wait="yes" />
+    </Component>
+
+    <Component Id="StartMenuComponent" Directory="AppMenuDir" Guid="3D4E5F60-7182-493A-BCAD-2E3F4A5B6C72">
+      <Shortcut Id="MenuShortcut"
+                Name="MiControl"
+                Target="[TrayDir]MiControlTray.exe"
+                WorkingDirectory="TrayDir"
+                Icon="AppIcon"
+                Description="MiControl battery and performance settings" />
+      <RemoveFolder Id="RemoveAppMenuDir" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\MiControl" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <CustomAction Id="ResetDefaults"
+                  FileRef="SvcExe"
+                  ExeCommand="--reset-defaults"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="ResetDefaults" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>
+
+
+
