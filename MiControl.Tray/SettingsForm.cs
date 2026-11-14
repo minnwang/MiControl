@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Windows.Forms;
 
 namespace MiControl.Tray;
@@ -190,7 +190,7 @@ public sealed class SettingsForm : Form
         if (action.StartsWith("keys:", StringComparison.Ordinal))
             return KeyNames.Describe(action.Substring(5));
         if (action.StartsWith("res:", StringComparison.Ordinal))
-            return action.Substring(4).Replace("|", "  ⇄  ");
+            return action.Substring(4).Replace("|", "⇄");
         return "";
     }
 
@@ -289,6 +289,7 @@ public sealed class SettingsForm : Form
         _ => $"未知 (0x{mode:X2})"
     };
 }
+
 
 
 
