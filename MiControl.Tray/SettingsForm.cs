@@ -101,6 +101,7 @@ public sealed class SettingsForm : Form
             combo.Items.Add($"默认：{defaultText}");
             combo.Items.Add("启动程序…");
             combo.Items.Add("模拟按键…");
+            combo.Items.Add("切换分辨率…");
             combo.Tag = code;
             combo.SelectedIndexChanged += (_, _) => OnActionChanged(code, combo);
 
@@ -178,6 +179,7 @@ public sealed class SettingsForm : Form
     {
         if (action.StartsWith("app:", StringComparison.Ordinal)) return 1;
         if (action.StartsWith("keys:", StringComparison.Ordinal)) return 2;
+        if (action.StartsWith("res:", StringComparison.Ordinal)) return 3;
         return 0;
     }
 
@@ -187,6 +189,8 @@ public sealed class SettingsForm : Form
             return Path.GetFileName(action.Substring(4).Split('|')[0]);
         if (action.StartsWith("keys:", StringComparison.Ordinal))
             return KeyNames.Describe(action.Substring(5));
+        if (action.StartsWith("res:", StringComparison.Ordinal))
+            return action.Substring(4).Replace("|", "  ⇄  ");
         return "";
     }
 
@@ -217,6 +221,18 @@ public sealed class SettingsForm : Form
                 var spec = KeyCaptureForm.CaptureSpec(this);
                 if (spec is null) { Revert(code); return; }
                 Commit(code, "keys:" + spec);
+                break;
+            }
+
+            case 3:
+            {
+                using var dlg = new ResolutionForm(_current[code]);
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Spec.Length == 0)
+                {
+                    Revert(code);
+                    return;
+                }
+                Commit(code, dlg.Spec);
                 break;
             }
         }

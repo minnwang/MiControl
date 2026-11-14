@@ -3,7 +3,7 @@
 
   <Package Name="MiControl"
            Manufacturer="MiControl"
-           Version="1.2.1"
+           Version="1.2.2"
            UpgradeCode="8F2B4C71-3A5D-4E6B-9C1D-5E7A2B4C6D80"
            Scope="perMachine"
            Language="2052"
@@ -89,6 +89,7 @@
 
   </Package>
 </Wix>
+
 
 
 

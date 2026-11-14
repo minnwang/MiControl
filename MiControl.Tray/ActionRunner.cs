@@ -42,6 +42,12 @@ internal static class ActionRunner
         if (action.StartsWith("keys:", StringComparison.OrdinalIgnoreCase))
         {
             SendKeySpec(action.Substring(5));
+            return;
+        }
+
+        if (action.StartsWith("res:", StringComparison.OrdinalIgnoreCase))
+        {
+            ResolutionSwitcher.Toggle(action.Substring(4));
         }
     }
 
