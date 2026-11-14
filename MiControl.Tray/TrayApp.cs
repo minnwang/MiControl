@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Windows.Forms;
 
 namespace MiControl.Tray;
@@ -8,6 +8,19 @@ public sealed class TrayApp : ApplicationContext
     private readonly NotifyIcon _icon;
     private readonly ContextMenuStrip _menu;
     private readonly System.Windows.Forms.Timer _timer;
+
+    /// <summary>Invisible owner window: keeps the programmatically shown menu out of the taskbar.</summary>
+    private readonly Form _menuOwner = new()
+    {
+        Text = "MiControl",
+        FormBorderStyle = FormBorderStyle.None,
+        ShowInTaskbar = false,
+        StartPosition = FormStartPosition.Manual,
+        // Kept at the origin so screen coordinates can be used directly when showing the menu.
+        Location = new Point(0, 0),
+        Size = new Size(1, 1),
+        Opacity = 0
+    };
 
     private static readonly Font HeaderFont = new("Microsoft YaHei UI", 9F, FontStyle.Bold);
     private readonly ToolStripMenuItem _header = new() { Enabled = false, Font = HeaderFont };
@@ -87,6 +100,16 @@ public sealed class TrayApp : ApplicationContext
             Visible = true,
             Text = "MiControl",
             ContextMenuStrip = _menu
+        };
+
+        // Force the owner handle to exist without ever showing the window.
+        _ = _menuOwner.Handle;
+        _icon.MouseUp += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left) return;
+            SetForegroundWindow(_menuOwner.Handle);
+            _menu.Show(_menuOwner, Cursor.Position);
+            MarkAsToolWindow(_menu.Handle);
         };
 
         _menu.Opening += (_, _) =>
@@ -284,6 +307,29 @@ public sealed class TrayApp : ApplicationContext
         }
         catch { }
     }
+
+    private static void MarkAsToolWindow(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) return;
+        const int GWL_EXSTYLE = -20;
+        const long WS_EX_TOOLWINDOW = 0x00000080;
+        try
+        {
+            long style = GetWindowLongPtr(handle, GWL_EXSTYLE).ToInt64();
+            if ((style & WS_EX_TOOLWINDOW) == 0)
+                SetWindowLongPtr(handle, GWL_EXSTYLE, new IntPtr(style | WS_EX_TOOLWINDOW));
+        }
+        catch { }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
