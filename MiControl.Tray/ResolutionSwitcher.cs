@@ -65,12 +65,18 @@ internal static class ResolutionSwitcher
 
     public static (uint W, uint H) Current()
     {
+        var (w, h, _) = CurrentMode();
+        return (w, h);
+    }
+
+    public static (uint W, uint H, uint Hz) CurrentMode()
+    {
         var dm = NewDevMode();
         if (EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref dm))
-            return (dm.dmPelsWidth, dm.dmPelsHeight);
+            return (dm.dmPelsWidth, dm.dmPelsHeight, dm.dmDisplayFrequency);
 
         var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 0, 0);
-        return ((uint)bounds.Width, (uint)bounds.Height);
+        return ((uint)bounds.Width, (uint)bounds.Height, 0);
     }
 
     /// <summary>Distinct modes supported by the primary display, largest first.</summary>

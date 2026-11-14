@@ -47,7 +47,12 @@ internal static class ActionRunner
 
         if (action.StartsWith("res:", StringComparison.OrdinalIgnoreCase))
         {
+            var before = ResolutionSwitcher.CurrentMode();
             ResolutionSwitcher.Toggle(action.Substring(4));
+            var after = ResolutionSwitcher.CurrentMode();
+            if (after != before)
+                Osd.Show($"{after.W} × {after.H}" + (after.Hz > 0 ? $" · {after.Hz} Hz" : ""));
+            return;
         }
     }
 
