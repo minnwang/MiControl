@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -127,7 +127,8 @@ public sealed class IpcServer : BackgroundService
         try
         {
             using var _ = client;
-            client.ReceiveTimeout = 5000;
+            // No read timeout: the connection stays open and is driven by pushes.
+            // Loopback sockets are torn down by the OS when the client process ends.
             using var stream = client.GetStream();
             using var reader = new StreamReader(stream, Encoding.UTF8, false, 4096, leaveOpen: true);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false), 4096, leaveOpen: true) { AutoFlush = true };
