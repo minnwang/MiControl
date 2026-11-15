@@ -100,14 +100,31 @@ public sealed class ChargeGuard : BackgroundService
             _store.Update(s => s.PerfMode = target);
     }
 
-    /// <summary>Writes the configured charge level and performance mode to the firmware.</summary>
+    /// <summary>Writes the configured charge level and performance mode to the firmware.
+    /// Both values are read back; a rejected write is retried once and then logged.</summary>
     private void ApplySettings()
     {
         var st = _store.State;
-        bool chargeOk = _mifs.ArmChargeLevel(st.ChargeLevel);
-        bool perfOk = _mifs.SetPerfMode(st.PerfMode);
-        _log.LogInformation("apply charge={Charge} ({ChargeOk}) perf={Perf} ({PerfOk})",
-            st.ChargeLevel, chargeOk, st.PerfMode, perfOk);
+
+        bool chargeOk = ApplyWithRetry(() => _mifs.SetChargeLevel(st.ChargeLevel));
+        bool perfOk = ApplyWithRetry(() => _mifs.SetPerfMode(st.PerfMode));
+
+        if (chargeOk && perfOk)
+        {
+            _log.LogInformation("apply charge={Charge} perf={Perf} verified", st.ChargeLevel, st.PerfMode);
+        }
+        else
+        {
+            _log.LogWarning("apply charge={Charge}({ChargeOk}) perf={Perf}({PerfOk}) not verified",
+                st.ChargeLevel, chargeOk, st.PerfMode, perfOk);
+        }
+    }
+
+    private static bool ApplyWithRetry(Func<bool> write)
+    {
+        if (write()) return true;
+        Thread.Sleep(300);
+        return write();
     }
 
     public override void Dispose()

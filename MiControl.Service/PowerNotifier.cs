@@ -22,6 +22,7 @@ internal sealed class PowerNotifier : IDisposable
     private const int PBT_APMRESUMEAUTOMATIC = 0x0012;
     private const int PBT_POWERSETTINGCHANGE = 0x8013;
     private const int DEVICE_NOTIFY_WINDOW_HANDLE = 0;
+    private const uint DeviceNotifyCallbackFlag = 2;
 
     private static readonly Guid AcDcPowerSource = new("5D3E9A59-E9D5-4B00-A6BD-FF34FF516548");
     private static readonly IntPtr HwndMessage = new(-3);
@@ -32,6 +33,12 @@ internal sealed class PowerNotifier : IDisposable
     private uint _threadId;
     private bool _disposed;
 
+    // Suspend/resume notifications: message-only windows do not receive the
+    // WM_POWERBROADCAST broadcast, so the dedicated power API is used instead.
+    private IntPtr _suspendRegistration;
+    private DeviceNotifyCallback? _suspendCallback;
+    private IntPtr _suspendParams;
+
     public PowerNotifier(Action<PowerEventKind> onChange)
     {
         _onChange = onChange;
@@ -40,12 +47,45 @@ internal sealed class PowerNotifier : IDisposable
 
     public void Start()
     {
+        RegisterSuspendResume();
+
         var thread = new Thread(Run)
         {
             IsBackground = true,
             Name = "PowerNotifications"
         };
         thread.Start();
+    }
+
+    private void RegisterSuspendResume()
+    {
+        try
+        {
+            _suspendCallback = OnSuspendResume;
+            _suspendParams = Marshal.AllocHGlobal(Marshal.SizeOf<DeviceNotifySubscribeParameters>());
+            var parameters = new DeviceNotifySubscribeParameters
+            {
+                Callback = Marshal.GetFunctionPointerForDelegate(_suspendCallback),
+                Context = IntPtr.Zero
+            };
+            Marshal.StructureToPtr(parameters, _suspendParams, false);
+
+            uint result = PowerRegisterSuspendResumeNotification(DeviceNotifyCallbackFlag, _suspendParams, out _suspendRegistration);
+            if (result != 0) _suspendRegistration = IntPtr.Zero;
+        }
+        catch { }
+    }
+
+    private uint OnSuspendResume(IntPtr context, uint type, IntPtr setting)
+    {
+        const uint PBT_APMRESUMEAUTOMATIC = 0x0012;
+        const uint PBT_APMRESUMESUSPEND = 0x0007;
+
+        if (type == PBT_APMRESUMEAUTOMATIC || type == PBT_APMRESUMESUSPEND)
+        {
+            try { _onChange(PowerEventKind.Resume); } catch { }
+        }
+        return 0;
     }
 
     private void Run()
@@ -105,6 +145,13 @@ internal sealed class PowerNotifier : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        try
+        {
+            if (_suspendRegistration != IntPtr.Zero)
+                PowerUnregisterSuspendResumeNotification(_suspendRegistration);
+            if (_suspendParams != IntPtr.Zero) Marshal.FreeHGlobal(_suspendParams);
+        }
+        catch { }
         try
         {
             if (_threadId != 0) PostThreadMessage(_threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
@@ -181,6 +228,22 @@ internal sealed class PowerNotifier : IDisposable
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
+
+    private delegate uint DeviceNotifyCallback(IntPtr context, uint type, IntPtr setting);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DeviceNotifySubscribeParameters
+    {
+        public IntPtr Callback;
+        public IntPtr Context;
+    }
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerRegisterSuspendResumeNotification(uint flags, IntPtr recipient, out IntPtr registrationHandle);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerUnregisterSuspendResumeNotification(IntPtr registrationHandle);
 }
+
 
 
