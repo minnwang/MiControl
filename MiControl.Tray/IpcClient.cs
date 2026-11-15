@@ -1,4 +1,4 @@
-﻿using System.Net.Sockets;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -213,6 +213,26 @@ public sealed class IpcClient
     {
         var r = Send(new JsonObject { ["cmd"] = "setAutoStart", ["enabled"] = enabled });
         return r["ok"]?.GetValue<bool>() ?? false;
+    }
+
+    public int GetRefreshMinutes()
+    {
+        try
+        {
+            var r = Send(new JsonObject { ["cmd"] = "getConfig" });
+            return r["refreshMinutes"]?.GetValue<int>() ?? 5;
+        }
+        catch { return 5; }
+    }
+
+    public bool SetRefreshMinutes(int minutes)
+    {
+        try
+        {
+            var r = Send(new JsonObject { ["cmd"] = "setRefresh", ["minutes"] = minutes });
+            return r["ok"]?.GetValue<bool>() ?? false;
+        }
+        catch { return false; }
     }
 
     public bool SetHotkey(string key, string action)

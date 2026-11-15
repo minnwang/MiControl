@@ -193,7 +193,17 @@ public sealed class IpcServer : BackgroundService
                     {
                         foreach (var kv in _store.State.Hotkeys) hk[kv.Key] = kv.Value;
                     }
-                    Reply(writer, new JsonObject { ["ok"] = true, ["hotkeys"] = hk, ["autoStart"] = _store.State.AutoStart });
+                    Reply(writer, new JsonObject { ["ok"] = true, ["hotkeys"] = hk, ["autoStart"] = _store.State.AutoStart, ["refreshMinutes"] = _store.State.RefreshMinutes });
+                    break;
+                }
+
+                case "setRefresh":
+                {
+                    int minutes = req["minutes"]?.GetValue<int>() ?? 5;
+                    if (minutes < 1) minutes = 1;
+                    if (minutes > 60) minutes = 60;
+                    _store.Update(s => s.RefreshMinutes = minutes);
+                    Reply(writer, new JsonObject { ["ok"] = true, ["refreshMinutes"] = minutes });
                     break;
                 }
 

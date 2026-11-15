@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace MiControl.Service;
@@ -11,6 +11,9 @@ public sealed class AppState
     public bool AutoFullSpeedOnAc { get; set; } = false;
     public bool AutoStart { get; set; } = true;
     public int PreviousPerfMode { get; set; } = 0x09;
+
+    /// <summary>Tray tooltip refresh interval in minutes (display only, 1..60).</summary>
+    public int RefreshMinutes { get; set; } = 5;
     public string Token { get; set; } = "";
     public int Port { get; set; } = 50123;
 

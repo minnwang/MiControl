@@ -1,13 +1,19 @@
-﻿using System.Text.Json.Nodes;
 using System.Threading;
-
 
 namespace MiControl.Service;
 
 /// <summary>
-/// Keeps the EC charge limit armed and mirrors the AC/DC performance mode.
-/// Driven by Windows power notifications (no polling): plug/unplug and resume
-/// are delivered immediately, with a five minute safety tick as a fallback.
+/// Applies the persisted settings to the EC firmware.
+///
+/// The configuration file is the single source of truth: whatever ChargeLevel and
+/// PerfMode it holds is written to the EC. The EC forgets those values whenever it
+/// re-initialises (boot, wake from sleep, some power transitions), so the values are
+/// re-applied on every such event instead of relying on a polling fallback.
+///
+/// Triggers:
+///   - service start
+///   - AC plug/unplug  (policy may update PerfMode first, then apply)
+///   - resume from sleep/hibernate
 /// </summary>
 public sealed class ChargeGuard : BackgroundService
 {
@@ -16,8 +22,8 @@ public sealed class ChargeGuard : BackgroundService
     private readonly ILogger<ChargeGuard> _log;
 
     private readonly AutoResetEvent _wake = new(false);
-    private bool _lastAc;
-    private int _ticks;
+    private PowerNotifier? _notifier;
+    private volatile int _pending = (int)PowerEventKind.Resume;
 
     public ChargeGuard(MifsClient mifs, StateStore store, ILogger<ChargeGuard> log)
     {
@@ -28,40 +34,53 @@ public sealed class ChargeGuard : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        StartPowerEventPump();
+        _notifier = new PowerNotifier(OnPowerEvent);
+        _notifier.Start();
 
         await Task.Delay(1500, ct);
 
-        var st = _store.State;
-        if (st.ChargeProtectEnabled)
-        {
-            bool ok = _mifs.SetChargeLevel(st.ChargeLevel);
-            _log.LogInformation("initial charge arm {Level} -> {Ok}", st.ChargeLevel, ok);
-        }
+        // Startup: firmware state is unknown, push the configured values.
+        RunSafely("startup", applyPolicy: false);
 
         while (!ct.IsCancellationRequested)
         {
-            try { Tick(); }
-            catch (Exception ex) { _log.LogWarning(ex, "charge guard tick failed"); }
+            try
+            {
+                if (WaitHandle.WaitAny(new[] { _wake, ct.WaitHandle }) == 1) break;
 
-            // Wake on power events; fall back to a five minute safety check.
-            if (WaitHandle.WaitAny(new[] { _wake, ct.WaitHandle }, TimeSpan.FromMinutes(5)) == 1) break;
+                var kind = (PowerEventKind)_pending;
+                if (kind == PowerEventKind.AcChange)
+                    RunSafely("power change", applyPolicy: true);
+                else
+                    RunSafely("resume", applyPolicy: false);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "power event handling failed");
+            }
         }
     }
 
-    private PowerNotifier? _notifier;
-
-    private void StartPowerEventPump()
+    private void OnPowerEvent(PowerEventKind kind)
     {
-        _notifier = new PowerNotifier(() => _wake.Set());
-        _notifier.Start();
+        _pending = (int)kind;
+        _wake.Set();
     }
 
-    private void Tick()
+    private void RunSafely(string reason, bool applyPolicy)
     {
-        TimingLog.Log("event/tick");
         IpcServer.WmiBusy = true;
-        try { TickCore(); }
+        try
+        {
+            if (applyPolicy) ApplyPowerPolicy();
+            ApplySettings();
+            _log.LogInformation("{Reason}: applied charge={Charge} perf={Perf}", reason,
+                _store.State.ChargeLevel, _store.State.PerfMode);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "{Reason}: apply failed", reason);
+        }
         finally
         {
             IpcServer.WmiBusy = false;
@@ -69,82 +88,26 @@ public sealed class ChargeGuard : BackgroundService
         }
     }
 
-    private void TickCore()
+    /// <summary>Updates the stored mode when "auto full speed on AC" is enabled.</summary>
+    private void ApplyPowerPolicy()
     {
-        var ps = IpcServer.PowerStatus();
-        bool ac = ps.ACLineStatus == 1;
-        bool acChanged = ac != _lastAc;
-        _lastAc = ac;
-        _ticks++;
-
         var st = _store.State;
+        if (!st.AutoFullSpeedOnAc) return;
 
-        if (acChanged)
-        {
-            IpcServer.InvalidateStatus();
-            PushFastStatus(ac, ps, st, (PerfMode)st.PerfMode);   // step 1: power state first, no WMI
-        }
-
-        if (st.ChargeProtectEnabled)
-        {
-            if (acChanged)
-            {
-                bool ok = _mifs.ArmChargeLevel(st.ChargeLevel);   // fast path: no readback
-                _log.LogInformation("re-arm charge after power change -> {Ok}", ok);
-            }
-            else if (_ticks % 60 == 0)
-            {
-                var current = _mifs.GetChargeLevel();
-                if (current is not null && current.Value != st.ChargeLevel)
-                {
-                    bool ok = _mifs.ArmChargeLevel(st.ChargeLevel);
-                    _log.LogInformation("charge drift {Cur} != {Want} -> {Ok}", current, st.ChargeLevel, ok);
-                }
-            }
-        }
-
-        if (st.AutoFullSpeedOnAc && acChanged)
-        {
-            var current = _mifs.GetPerfMode();
-            if (ac && current != PerfMode.FullSpeed)
-            {
-                _store.Update(s => s.PerfMode = PerfMode.FullSpeed);
-                bool ok = _mifs.SetPerfMode(PerfMode.FullSpeed);
-                _log.LogInformation("AC connected -> FullSpeed {Ok}", ok);
-                PushFastStatus(ac, ps, st, PerfMode.FullSpeed);
-                IpcServer.InvalidateStatus();
-                IpcServer.BroadcastStatus();
-            }
-            else if (!ac && current == PerfMode.FullSpeed)
-            {
-                _store.Update(s => s.PerfMode = PerfMode.Smart);
-                bool ok = _mifs.SetPerfMode(PerfMode.Smart);
-                _log.LogInformation("AC disconnected -> Smart {Ok}", ok);
-                PushFastStatus(ac, ps, st, PerfMode.Smart);
-                IpcServer.InvalidateStatus();
-                IpcServer.BroadcastStatus();
-            }
-        }
+        bool ac = IpcServer.PowerStatus().ACLineStatus == 1;
+        var target = ac ? PerfMode.FullSpeed : PerfMode.Smart;
+        if (st.PerfMode != target)
+            _store.Update(s => s.PerfMode = target);
     }
 
-    // Push immediately using values we already have: no WMI round trip.
-    private static void PushFastStatus(bool ac, IpcServer.SYSTEM_POWER_STATUS ps, AppState st, PerfMode mode)
+    /// <summary>Writes the configured charge level and performance mode to the firmware.</summary>
+    private void ApplySettings()
     {
-        var payload = new JsonObject
-        {
-            ["ok"] = true,
-            ["ac"] = ac,
-            ["charging"] = (ps.BatteryFlag & 0x08) != 0,
-            ["battery"] = ps.BatteryLifePercent <= 100 ? ps.BatteryLifePercent : -1,
-            ["perf"] = (int)mode,
-            ["chargeCode"] = (int)st.ChargeLevel,
-            ["chargePct"] = st.ChargeLevel.ToPercent(),
-            ["health"] = -1,
-            ["watts"] = -1,
-            ["autoFull"] = st.AutoFullSpeedOnAc,
-            ["chargeEnabled"] = st.ChargeProtectEnabled
-        };
-        IpcServer.BroadcastStatusPayload(payload);
+        var st = _store.State;
+        bool chargeOk = _mifs.ArmChargeLevel(st.ChargeLevel);
+        bool perfOk = _mifs.SetPerfMode(st.PerfMode);
+        _log.LogInformation("apply charge={Charge} ({ChargeOk}) perf={Perf} ({PerfOk})",
+            st.ChargeLevel, chargeOk, st.PerfMode, perfOk);
     }
 
     public override void Dispose()
@@ -154,14 +117,3 @@ public sealed class ChargeGuard : BackgroundService
         base.Dispose();
     }
 }
-
-
-
-
-
-
-
-
-
-
-

@@ -14,6 +14,10 @@ public sealed class SettingsForm : Form
     private readonly Label _health = new() { AutoSize = true };
     private readonly CheckBox _autoFull = new() { Text = "插电时自动切换到全速模式", AutoSize = true };
 
+    private readonly Label _refreshLabel = new() { Text = "电量刷新间隔", AutoSize = true };
+    private readonly NumericUpDown _refresh = new() { Minimum = 1, Maximum = 60, Width = 64 };
+    private readonly Label _refreshUnit = new() { Text = "分钟", AutoSize = true };
+
 
     private const int LabelX = 18;
     private const int ComboX = 128;
@@ -23,7 +27,7 @@ public sealed class SettingsForm : Form
 
     private readonly int _rowH;
     private readonly int _ctlH;
-    private readonly int _rowTop = 250;
+    private readonly int _rowTop = 262;
 
     // code, display name, default action, human readable default
     private static readonly (string Code, string Name, string Default, string DefaultText)[] Keys =
@@ -71,11 +75,23 @@ public sealed class SettingsForm : Form
         _autoFull.Location = new Point(18, 146);
         Controls.AddRange(new Control[] { _battery, _perf, _charge, _health, _autoFull });
 
+        _refreshLabel.Location = new Point(18, 183);
+        _refresh.Location = new Point(160, 180);
+        _refresh.Size = new Size(60, _ctlH);
+        _refreshUnit.Location = new Point(230, 183);
+        _refresh.TextAlign = HorizontalAlignment.Center;
+        Controls.AddRange(new Control[] { _refreshLabel, _refresh, _refreshUnit });
+
+        _refresh.ValueChanged += (_, _) =>
+        {
+            if (!_loading) _ipc.SetRefreshMinutes((int)_refresh.Value);
+        };
+
         Controls.Add(new Label
         {
             Text = "快捷键",
             Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold),
-            Location = new Point(16, 210),
+            Location = new Point(16, 222),
             AutoSize = true
         });
 
@@ -155,6 +171,7 @@ public sealed class SettingsForm : Form
         try
         {
             var map = _ipc.GetHotkeys();
+            _refresh.Value = Math.Clamp(_ipc.GetRefreshMinutes(), (int)_refresh.Minimum, (int)_refresh.Maximum);
             foreach (var k in Keys)
             {
                 var action = map.TryGetValue(k.Code, out var v) ? v : k.Default;
@@ -289,6 +306,13 @@ public sealed class SettingsForm : Form
         _ => $"未知 (0x{mode:X2})"
     };
 }
+
+
+
+
+
+
+
 
 
 

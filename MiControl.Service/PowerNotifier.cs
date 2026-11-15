@@ -8,6 +8,12 @@ namespace MiControl.Service;
 /// Creates a message-only window on its own thread and registers for
 /// GUID_ACDC_POWER_SOURCE plus resume broadcasts.
 /// </summary>
+internal enum PowerEventKind
+{
+    Resume = 0,
+    AcChange = 1
+}
+
 internal sealed class PowerNotifier : IDisposable
 {
     private const int WM_POWERBROADCAST = 0x0218;
@@ -20,13 +26,13 @@ internal sealed class PowerNotifier : IDisposable
     private static readonly Guid AcDcPowerSource = new("5D3E9A59-E9D5-4B00-A6BD-FF34FF516548");
     private static readonly IntPtr HwndMessage = new(-3);
 
-    private readonly Action _onChange;
+    private readonly Action<PowerEventKind> _onChange;
     private readonly WndProcDelegate _wndProc;   // keep alive: native code holds the pointer
     private IntPtr _hwnd;
     private uint _threadId;
     private bool _disposed;
 
-    public PowerNotifier(Action onChange)
+    public PowerNotifier(Action<PowerEventKind> onChange)
     {
         _onChange = onChange;
         _wndProc = WndProc;
@@ -78,9 +84,13 @@ internal sealed class PowerNotifier : IDisposable
         if (msg == WM_POWERBROADCAST)
         {
             int w = wParam.ToInt32();
-            if (w == PBT_APMRESUMEAUTOMATIC || w == PBT_POWERSETTINGCHANGE)
+            if (w == PBT_APMRESUMEAUTOMATIC)
             {
-                try { _onChange(); } catch { }
+                try { _onChange(PowerEventKind.Resume); } catch { }
+            }
+            else if (w == PBT_POWERSETTINGCHANGE)
+            {
+                try { _onChange(PowerEventKind.AcChange); } catch { }
             }
         }
         else if (msg == WM_DESTROY)
@@ -172,4 +182,5 @@ internal sealed class PowerNotifier : IDisposable
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 }
+
 

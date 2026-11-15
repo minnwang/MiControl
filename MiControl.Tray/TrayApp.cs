@@ -125,6 +125,7 @@ public sealed class TrayApp : ApplicationContext
         _timer = new System.Windows.Forms.Timer { Interval = 300000 };
         _timer.Tick += (_, _) => RefreshAsync();
         _timer.Start();
+        ApplyRefreshInterval();
 
         _uiContext = SynchronizationContext.Current;
 
@@ -410,8 +411,18 @@ public sealed class TrayApp : ApplicationContext
         }
 
         _settings = new SettingsForm(_ipc!);
+        _settings.FormClosed += (_, _) => ApplyRefreshInterval();
         _settings.Show();
         _settings.Activate();
+    }
+
+    /// <summary>Display-only refresh interval, configured in the settings window.</summary>
+    private void ApplyRefreshInterval()
+    {
+        int minutes = _ipc?.GetRefreshMinutes() ?? 5;
+        if (minutes < 1) minutes = 1;
+        if (minutes > 60) minutes = 60;
+        _timer.Interval = minutes * 60_000;
     }
 
     private void ExitApp()
