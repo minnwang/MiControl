@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 
 namespace MiControl.Service;
 
@@ -46,7 +46,15 @@ public sealed class ChargeGuard : BackgroundService
         {
             try
             {
-                if (WaitHandle.WaitAny(new[] { _wake, ct.WaitHandle }) == 1) break;
+                int minutes = Math.Clamp(_store.State.RefreshMinutes, 1, 60);
+                int index = WaitHandle.WaitAny(new[] { _wake, ct.WaitHandle }, TimeSpan.FromMinutes(minutes));
+                if (index == 1) break;
+
+                if (index == WaitHandle.WaitTimeout)
+                {
+                    Reconcile();
+                    continue;
+                }
 
                 var kind = (PowerEventKind)_pending;
                 if (kind == PowerEventKind.AcChange)
@@ -58,6 +66,41 @@ public sealed class ChargeGuard : BackgroundService
             {
                 _log.LogWarning(ex, "power event handling failed");
             }
+        }
+    }
+
+    /// <summary>
+    /// Compares the firmware with the configured values. A difference can only come
+    /// from the EC itself (writes are verified), so it is logged and corrected.
+    /// </summary>
+    private void Reconcile()
+    {
+        IpcServer.WmiBusy = true;
+        try
+        {
+            var st = _store.State;
+            var actualPerf = _mifs.GetPerfMode();
+            var actualCharge = _mifs.GetChargeLevel();
+
+            bool perfDrift = actualPerf is not null && actualPerf.Value != st.PerfMode;
+            bool chargeDrift = actualCharge is not null && actualCharge.Value != st.ChargeLevel;
+
+            if (!perfDrift && !chargeDrift) return;
+
+            if (perfDrift)
+                MiLog.Drift("perf", st.PerfMode.ToString(), actualPerf!.Value.ToString(), "re-applying");
+            if (chargeDrift)
+                MiLog.Drift("charge", st.ChargeLevel.ToString(), actualCharge!.Value.ToString(), "re-applying");
+
+            ApplySettings();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "reconcile failed");
+        }
+        finally
+        {
+            IpcServer.WmiBusy = false;
         }
     }
 
@@ -109,14 +152,18 @@ public sealed class ChargeGuard : BackgroundService
         bool chargeOk = ApplyWithRetry(() => _mifs.SetChargeLevel(st.ChargeLevel));
         bool perfOk = ApplyWithRetry(() => _mifs.SetPerfMode(st.PerfMode));
 
-        if (chargeOk && perfOk)
+        if (!chargeOk)
         {
-            _log.LogInformation("apply charge={Charge} perf={Perf} verified", st.ChargeLevel, st.PerfMode);
+            var readback = _mifs.GetChargeLevel();
+            MiLog.Failure("charge", st.ChargeLevel.ToString(), readback?.ToString() ?? "unknown", 2);
+            _log.LogWarning("charge write rejected: wanted={Wanted} readback={Readback}", st.ChargeLevel, readback);
         }
-        else
+
+        if (!perfOk)
         {
-            _log.LogWarning("apply charge={Charge}({ChargeOk}) perf={Perf}({PerfOk}) not verified",
-                st.ChargeLevel, chargeOk, st.PerfMode, perfOk);
+            var readback = _mifs.GetPerfMode();
+            MiLog.Failure("perf", st.PerfMode.ToString(), readback?.ToString() ?? "unknown", 2);
+            _log.LogWarning("perf write rejected: wanted={Wanted} readback={Readback}", st.PerfMode, readback);
         }
     }
 
@@ -134,3 +181,4 @@ public sealed class ChargeGuard : BackgroundService
         base.Dispose();
     }
 }
+

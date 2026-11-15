@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -266,8 +266,9 @@ public sealed class IpcServer : BackgroundService
     {
         var st = _store.State;
         RefreshCache();
-        var perf = WmiBusy ? (PerfMode)_store.State.PerfMode : _cachedPerf;   // optimistic while switching
-        var charge = _cachedCharge;
+        var st0 = _store.State;
+        var actualPerf = _cachedPerf;
+        var actualCharge = _cachedCharge;
         GetSystemPowerStatus(out var ps);
 
         var o = new JsonObject
@@ -276,9 +277,12 @@ public sealed class IpcServer : BackgroundService
             ["ac"] = ps.ACLineStatus == 1,
             ["charging"] = (ps.BatteryFlag & 0x08) != 0,
             ["battery"] = ps.BatteryLifePercent <= 100 ? ps.BatteryLifePercent : -1,
-            ["perf"] = perf is null ? -1 : (int)perf.Value,
-            ["chargeCode"] = charge is null ? -1 : (int)charge.Value,
-            ["chargePct"] = charge is null ? -1 : charge.Value.ToPercent(),
+            // Desired values are authoritative for the UI; actual values are for diagnostics.
+            ["perf"] = (int)st0.PerfMode,
+            ["perfActual"] = actualPerf is null ? -1 : (int)actualPerf.Value,
+            ["chargeCode"] = (int)st0.ChargeLevel,
+            ["chargePct"] = st0.ChargeLevel.ToPercent(),
+            ["chargeActualPct"] = actualCharge is null ? -1 : actualCharge.Value.ToPercent(),
             ["health"] = _cachedHealth ?? -1,
             ["watts"] = _cachedWatts ?? -1,
             ["autoFull"] = st.AutoFullSpeedOnAc,
@@ -326,6 +330,7 @@ public sealed class IpcServer : BackgroundService
         return s;
     }
 }
+
 
 
 
